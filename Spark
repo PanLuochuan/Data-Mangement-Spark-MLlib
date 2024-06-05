@@ -1,0 +1,51 @@
+from pyspark.sql import SparkSession
+from pyspark.ml import Pipeline
+from pyspark.sql.functions import col
+from pyspark.ml.classification import RandomForestClassifier
+from pyspark.ml.evaluation import MulticlassClassificationEvaluator
+from pyspark.ml.feature import VectorAssembler,StringIndexer
+from pyspark.ml.tuning import CrossValidator, ParamGridBuilder
+spark = SparkSession.builder.appName("IrisClassification").getOrCreate()
+iris = spark.read.csv("/user/maria_dev/assignment3/Iris.csv", inferSchema=True, header=True)
+iris.show()
+assembler = VectorAssembler(inputCols=["SepalLengthCm", "SepalWidthCm", "PetalLengthCm", "PetalWidthCm"], outputCol="features")
+
+label = StringIndexer(inputCol="Species", outputCol="label")
+pipeline = Pipeline(stages = [assembler,label])
+iris1 = pipeline.fit(iris).transform(iris)
+
+train, test = iris1.randomSplit([0.7, 0.3], seed=1234)
+train_count = train.count()
+test_count = test.count()
+print("Training Dataset Count: " + str(train_count))
+print("Test Dataset Count: " + str(test_count))
+
+rf = RandomForestClassifier(labelCol = "label",featuresCol = "features")
+
+paramGrid = ParamGridBuilder() \
+    .addGrid(rf.numTrees, [10, 20, 30]) \
+    .addGrid(rf.maxDepth, [3, 5, 10]) \
+    .build()
+crossval = CrossValidator(estimator=rf,
+                          estimatorParamMaps=paramGrid,
+                          evaluator=MulticlassClassificationEvaluator(labelCol="label",metricName="accuracy"),
+                          numFolds=5)
+
+cvModel = crossval.fit(train)
+best_model = cvModel.bestModel
+print("Best parameters:", best_model._java_obj.getMaxDepth(), best_model._java_obj.getNumTrees())
+print("Best cross-validation score: {:.2f}".format(cvModel.avgMetrics[0]))
+
+predictions = best_model.transform(test)
+
+evaluator = MulticlassClassificationEvaluator(labelCol="label", predictionCol="prediction")
+accuracy = evaluator.evaluate(predictions,{evaluator.metricName:"accuracy"})
+precision = evaluator.evaluate(predictions,{evaluator.metricName:"weightedPrecision"})
+recall = evaluator.evaluate(predictions,{evaluator.metricName:"weightedRecall"})
+f1 = evaluator.evaluate(predictions,{evaluator.metricName:"f1"})
+print("Test set accuracy: {:.2f}".format(accuracy))
+print("Test set precision: {:.2f}".format(precision))
+print("Test set recall: {:.2f}".format(recall))
+print("F1 score: {:.2f}".format(f1))
+
+spark.stop()
