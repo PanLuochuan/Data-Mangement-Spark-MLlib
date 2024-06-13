@@ -7,14 +7,16 @@ from pyspark.ml.feature import VectorAssembler,StringIndexer
 from pyspark.ml.tuning import CrossValidator, ParamGridBuilder
 spark = SparkSession.builder.appName("IrisClassification").getOrCreate()
 iris = spark.read.csv("/user/maria_dev/assignment3/Iris.csv", inferSchema=True, header=True)
+iris.dropna()
 iris.show()
-assembler = VectorAssembler(inputCols=["SepalLengthCm", "SepalWidthCm", "PetalLengthCm", "PetalWidthCm"], outputCol="features")
+indexer = StringIndexer(inputCol="Species", outputCol="label")
+iris = indexer.fit(iris).transform(iris)
+iris.show()
+assembler = VectorAssembler(inputCols=[col for col in iris.columns if col not in ['Id', 'Species', 'label']], outputCol="features")
+iris = assembler.transform(iris)
 
-label = StringIndexer(inputCol="Species", outputCol="label")
-pipeline = Pipeline(stages = [assembler,label])
-iris1 = pipeline.fit(iris).transform(iris)
 
-train, test = iris1.randomSplit([0.7, 0.3], seed=1234)
+train, test = iris.randomSplit([0.7, 0.3], seed=42)
 train_count = train.count()
 test_count = test.count()
 print("Training Dataset Count: " + str(train_count))
@@ -23,8 +25,9 @@ print("Test Dataset Count: " + str(test_count))
 rf = RandomForestClassifier(labelCol = "label",featuresCol = "features")
 
 paramGrid = ParamGridBuilder() \
-    .addGrid(rf.numTrees, [10, 20, 30]) \
-    .addGrid(rf.maxDepth, [3, 5, 10]) \
+    .addGrid(rf.numTrees, [10, 20, 30, 50]) \
+    .addGrid(rf.maxDepth, [3, 5, 10, 15]) \
+    .addGrid(rf.minInstancesPerNode, [1, 2, 4, 6]) \
     .build()
 crossval = CrossValidator(estimator=rf,
                           estimatorParamMaps=paramGrid,
@@ -33,7 +36,7 @@ crossval = CrossValidator(estimator=rf,
 
 cvModel = crossval.fit(train)
 best_model = cvModel.bestModel
-print("Best parameters:", best_model._java_obj.getMaxDepth(), best_model._java_obj.getNumTrees())
+print("Best parameters: numTrees: {}, maxDepth: {}, minInstancesPerNode: {}".format(best_model._java_obj.getNumTrees(), best_model._java_obj.getMaxDepth(), best_model._java_obj.getMinInstancesPerNode()))
 print("Best cross-validation score: {:.2f}".format(cvModel.avgMetrics[0]))
 
 predictions = best_model.transform(test)
@@ -43,9 +46,9 @@ accuracy = evaluator.evaluate(predictions,{evaluator.metricName:"accuracy"})
 precision = evaluator.evaluate(predictions,{evaluator.metricName:"weightedPrecision"})
 recall = evaluator.evaluate(predictions,{evaluator.metricName:"weightedRecall"})
 f1 = evaluator.evaluate(predictions,{evaluator.metricName:"f1"})
-print("Test set accuracy: {:.2f}".format(accuracy))
-print("Test set precision: {:.2f}".format(precision))
-print("Test set recall: {:.2f}".format(recall))
-print("F1 score: {:.2f}".format(f1))
+print("Test set accuracy: {:.5f}".format(accuracy))
+print("Test set precision: {:.5f}".format(precision))
+print("Test set recall: {:.5f}".format(recall))
+print("F1 score: {:.5f}".format(f1))
 
 spark.stop()
